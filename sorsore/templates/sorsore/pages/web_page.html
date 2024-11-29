@@ -16,4 +16,25 @@
   <h1>{{page.title}}</h1>
 </div>
 {% endif %}
+{% if allow_comments %}
+  <div class="container comment-section">
+    <h2 class="my-4">Add a Comment</h2>
+    <form method="post" action="{% pageurl page %}" class="comment-form">
+      {% csrf_token %}
+      {{ form.as_p }}
+      <input type="submit" class="btn btn-primary"></input>
+    </form>
+    <hr>
+  <br/>
+  {% for comment in comments %}
+    <div class="card bg-dark text-white">
+      <h4 class="card-title">{{ comment.author }}</h4>
+      <hr>
+      <p class="card-text">{{ comment.comment_body }}</p>
+    </div><br/>
+  {% empty %}
+    <p> No comments yet! </p>
+  {% endfor %}
+  </div>
+{% endif %}
 {% endblock %}

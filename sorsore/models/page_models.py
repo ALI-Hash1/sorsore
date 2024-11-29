@@ -96,7 +96,6 @@ from sorsore.wagtail_flexible_forms.models import (
 from sorsore.settings import crx_settings
 from sorsore.widgets import ClassifierSelectWidget
 
-
 if TYPE_CHECKING:
     from wagtail.images.models import AbstractImage
 
@@ -104,7 +103,6 @@ if TYPE_CHECKING:
 from sorsore.themes.blocks import index as themes_body
 
 logger = logging.getLogger("sorsore")
-
 
 CRX_PAGE_MODELS = []
 
@@ -654,6 +652,19 @@ class CoderedPage(WagtailCacheMixin, SeoMixin, Page, metaclass=CoderedPageMeta):
 ###############################################################################
 
 
+class PageCommentInlinePanel(InlinePanel):
+    def __init__(self, relation_name, **kwargs):
+        super().__init__(relation_name, **kwargs)
+
+    def get_formset(self, *args, **kwargs):
+        formset = super().get_formset(*args, **kwargs)
+        from .forms import CommentCreateForm
+        self.form_class = CommentCreateForm()
+        for form in formset.forms:
+            form.instance.page = self.instance
+            return formset
+
+
 class CoderedWebPage(CoderedPage):
     """
     Provides a body and body-related functionality.
@@ -675,13 +686,60 @@ class CoderedWebPage(CoderedPage):
         use_json_field=True,
     )
 
+    # allow comment
+    allow_comments = models.BooleanField(default=True)
+
     # Search fields
     search_fields = CoderedPage.search_fields + [index.SearchField("body")]
 
     # Panels
     body_content_panels = [
         FieldPanel("body"),
+        FieldPanel("allow_comments")
     ]
+
+    def serve(self, request, *args, **kwargs):
+        from .forms import CommentCreateForm
+        if request.method == 'POST':
+            form = CommentCreateForm(request.POST)
+            if form.is_valid():
+                form = form.save(commit=False)
+                form.page = self
+                form.save()
+                redirect(self.url)
+                # TODO: add a success message
+            else:
+                # TODO: add a error message
+                redirect(self.url)
+        else:
+            # TODO: add a error message
+            redirect('/')
+        return super().serve(request, *args, **kwargs)
+
+    comment_panels = [
+        PageCommentInlinePanel('comments', label='Comments', panels=[
+            FieldPanel('author'),
+            FieldPanel('comment_body')
+        ])
+    ]
+
+    @cached_classmethod
+    def get_edit_handler(cls):
+        parent_edit_handler = super().get_edit_handler()
+        if cls.allow_comments:
+            comment_tab = ObjectList(cls.comment_panels, heading='Comments')
+            panels = parent_edit_handler.children + [comment_tab]
+            edit_handler = TabbedInterface(panels)
+            return edit_handler.bind_to_model(cls)
+        return parent_edit_handler
+
+    def get_context(self, request, *args, **kwargs):
+        from .forms import CommentCreateForm
+        context = super().get_context(request)
+        context['comments'] = PageComment.objects.filter(page=self)
+        context['form'] = CommentCreateForm()
+        context['allow_comments'] = self.allow_comments
+        return context
 
     @property
     def body_preview(self):
@@ -695,6 +753,14 @@ class CoderedWebPage(CoderedPage):
         # truncate and add ellipses
         preview = body[:200] + "..." if len(body) > 200 else body
         return mark_safe(preview)
+
+
+class PageComment(models.Model):
+    page = models.ForeignKey(Page, on_delete=models.CASCADE, related_name='comments')
+    comment_body = models.TextField()
+    author = models.CharField(max_length=255)
+
+    def __str__(self): return f'{self.author}: {self.comment_body[:15]}'
 
 
 class CoderedArticlePage(CoderedWebPage):
@@ -847,8 +913,8 @@ class CoderedArticleIndexPage(CoderedWebPage):
 
     index_order_by_default = "-date_display"
     index_order_by_choices = (
-        ("-date_display", "Display publish date, newest first"),
-    ) + CoderedWebPage.index_order_by_choices
+                                 ("-date_display", "Display publish date, newest first"),
+                             ) + CoderedWebPage.index_order_by_choices
 
     show_images = models.BooleanField(
         default=True,
@@ -1129,8 +1195,8 @@ class CoderedEventIndexPage(CoderedWebPage):
 
     index_order_by_default = "next_occurrence"
     index_order_by_choices = (
-        ("next_occurrence", "Display next occurrence, soonest first"),
-    ) + CoderedWebPage.index_order_by_choices
+                                 ("next_occurrence", "Display next occurrence, soonest first"),
+                             ) + CoderedWebPage.index_order_by_choices
 
     default_calendar_view = models.CharField(
         blank=True,
@@ -2113,8 +2179,8 @@ class CoderedLocationPage(CoderedWebPage):
         if (
             self.auto_update_latlng
             and LayoutSettings.for_site(
-                Site.objects.get(is_default_site=True)
-            ).google_maps_api_key
+            Site.objects.get(is_default_site=True)
+        ).google_maps_api_key
         ):
             try:
                 g = geocoder.google(
@@ -2234,9 +2300,9 @@ class CoderedLocationIndexPage(CoderedWebPage):
         ).google_maps_api_key
         return context
 
+
 # Sorsore Models
 class LandingPage(CoderedWebPage):
-
     class Meta:
         verbose_name = _("Landing Page")
 
